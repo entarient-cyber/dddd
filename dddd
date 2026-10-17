@@ -25,7 +25,7 @@ local FONT = Enum.Font.GothamBlack
 local SRC = [==[
 local RunService = game:GetService("RunService")
 
-local Children       = 150000
+local Children       = 200000
 local NestedPerChild = 0
 local FieldsPerChild = 0
 local FireBurst      = 1
