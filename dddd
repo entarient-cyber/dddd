@@ -39,8 +39,6 @@ local state = {
     remote  = nil,
     cache   = nil,
     pad     = "",
-    fires   = 0,
-    lastTick = 0,
 }
 
 local function resolve()
@@ -91,29 +89,22 @@ local function fire()
     for _ = 1, FireBurst do
         state.remote:FireServer(payload)
     end
-    state.fires = state.fires + 1
-    state.lastTick = tick()
-end
-
--- the actual fire loop, spawnable multiple times
-local function fireLoop()
-    while state.running do
-        pcall(fire)
-        if FrameDelay > 0 then
-            task.wait(FrameDelay)
-        else
-            RunService.Heartbeat:Wait()
-        end
-    end
 end
 
 local function start()
     if state.running then return end
     state.running = true
     state.cache = nil
-    state.fires = 0
-    state.lastTick = tick()
-    state.thread = task.spawn(fireLoop)
+    state.thread = task.spawn(function()
+        while state.running do
+            pcall(fire)
+            if FrameDelay > 0 then
+                task.wait(FrameDelay)
+            else
+                RunService.Heartbeat:Wait()
+            end
+        end
+    end)
 end
 
 local function stop()
@@ -122,27 +113,6 @@ local function stop()
     state.thread = nil
     state.cache = nil
 end
-
--- ═══ WATCHDOG — respawn loop if it dies or stalls ═══
-task.spawn(function()
-    while true do
-        task.wait(2)
-        if state.running then
-            local stalled = (tick() - state.lastTick) > 3
-            local dead = false
-            if state.thread then
-                local ok, status = pcall(coroutine.status, state.thread)
-                if ok and status == "dead" then dead = true end
-            else
-                dead = true
-            end
-            if dead or stalled then
-                if state.thread then pcall(task.cancel, state.thread) end
-                state.thread = task.spawn(fireLoop)
-            end
-        end
-    end
-end)
 
 return {
     start  = start,
