@@ -1,152 +1,483 @@
---!nonstrict
+--[[ BUILD TEXT — with build mode dropdown ]]
 local Players = game:GetService("Players")
-local TextChatService = game:GetService("TextChatService")
-local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local LP = Players.LocalPlayer
 
-local player = Players.LocalPlayer
-
--- ═══════════ EXACT SAME VALUES AS ORIGINAL ═══════════
-local Children       = 150000
-local NestedPerChild = 0
-local FieldsPerChild = 0
-local FireBurst      = 1
-local FrameDelay     = 0.125
-local FieldSize      = 0
-local RebuildEach    = false
-
-local state = {
-    running = false,
-    thread  = nil,
-    remote  = nil,
-    cache   = nil,
-    pad     = "",
-    fires   = 0,
+local FONT = {
+    A={".###.","#...#","#####","#...#","#...#"},B={"####.","#...#","####.","#...#","####."},
+    C={".####","#....","#....","#....","####."},D={"####.","#...#","#...#","#...#","####."},
+    E={"#####","#....","####.","#....","#####"},F={"#####","#....","####.","#....","#...."},
+    G={".####","#....","#..##","#...#",".###."},H={"#...#","#...#","#####","#...#","#...#"},
+    I={"#####","..#..","..#..","..#..","#####"},J={"..###","...#.","...#.","#..#.",".##.."},
+    K={"#...#","#..#.","###..","#..#.","#...#"},L={"#....","#....","#....","#....","#####"},
+    M={"#...#","##.##","#.#.#","#...#","#...#"},N={"#...#","##..#","#.#.#","#..##","#...#"},
+    O={".###.","#...#","#...#","#...#",".###."},P={"####.","#...#","####.","#....","#...."},
+    Q={".###.","#...#","#.#.#","#..#.",".##.#"},R={"####.","#...#","####.","#..#.","#...#"},
+    S={".####","#....","####.","....#","####."},T={"#####","..#..","..#..","..#..","..#.."},
+    U={"#...#","#...#","#...#","#...#",".###."},V={"#...#","#...#","#...#",".#.#.","..#.."},
+    W={"#...#","#...#","#.#.#","##.##","#...#"},X={"#...#",".#.#.","..#..",".#.#.","#...#"},
+    Y={"#...#",".#.#.","..#..","..#..","..#.."},Z={"#####","...#.","..#..",".#...","#####"},
+    ["0"]={".###.","#..##","#.#.#","##..#",".###."},["1"]={"..#..",".##..","..#..","..#..",".###."},
+    ["2"]={".###.","#...#","..##.",".#...","#####"},["3"]={"####.","....#",".###.","....#","####."},
+    ["4"]={"#..#.","#..#.","#####","...#.","...#."},["5"]={"#####","#....","####.","....#","####."},
+    ["6"]={".###.","#....","####.","#...#",".###."},["7"]={"#####","....#","...#.","..#..","..#.."},
+    ["8"]={".###.","#...#",".###.","#...#",".###."},["9"]={".###.","#...#",".####","....#",".###."},
+    ["!"]={"..#..","..#..","..#..","....","..#.."},["?"]={"###.","....#","..##.","....","..#.."},
+    ["."]={"....","....","....","....","..#.."},["-"]={"....","....","###.","....","...."},
+    [" "]={"....","....","....","....","...."},
 }
 
-local function resolve()
-    local rrs = game:FindFirstChild("RobloxReplicatedStorage")
-    if not rrs then return nil end
-    local r = rrs:FindFirstChild("SetPlayerBlockList")
-    if r and (r:IsA("RemoteEvent") or r:IsA("UnreliableRemoteEvent")) then
-        return r
-    end
-    return nil
+local function getBuildRemote()
+    local char = LP.Character
+    local bp = LP:FindFirstChildOfClass("Backpack")
+    local tool = (char and char:FindFirstChild("Build")) or (bp and bp:FindFirstChild("Build"))
+    if not tool then return nil, nil end
+    local s = tool:FindFirstChild("Script")
+    local r = s and s:FindFirstChild("Event")
+    if r and r:IsA("RemoteEvent") then return r, tool end
+    return nil, nil
 end
 
-state.remote = resolve()
-print("[CRASH] remote on load:", state.remote and state.remote:GetFullName() or "NOT FOUND")
+local function snapAxis(v) return math.round((v - 2) / 4) * 4 + 2 end
+local function snapVec(p) return Vector3.new(snapAxis(p.X), snapAxis(p.Y), snapAxis(p.Z)) end
 
-pcall(function()
-    game:GetService("NetworkClient"):SetOutgoingKBPSLimit(math.huge)
-end)
-
-state.pad = FieldSize > 0 and string.rep("P", FieldSize) or ""
-
-local function build()
-    local root = table.create(Children)
-    for i = 1, Children do
-        local entry = { id = i, v = i * 2 }
-        for k = 1, FieldsPerChild do
-            entry["k" .. k] = (FieldSize > 0) and state.pad or (i + k)
+local function textPoints(text, spacing)
+    local pts = {}
+    local x = 0
+    for i = 1, #text do
+        local c = text:sub(i,i):upper()
+        local glyph = FONT[c]
+        if glyph then
+            for row = 1, 5 do
+                for col = 1, #glyph[row] do
+                    if glyph[row]:sub(col,col) == "#" then
+                        table.insert(pts, Vector3.new((x+col-1)*spacing, (5-row)*spacing, 0))
+                    end
+                end
+            end
+            x = x + #glyph[1] + 1
         end
-        for j = 1, NestedPerChild do
-            entry["n" .. j] = { a = i, b = j }
-        end
-        root[i] = entry
     end
-    return root
+    return pts
 end
 
-local function fire()
-    if not state.remote then
-        state.remote = resolve()
-        if not state.remote then return end
-    end
-    local payload
-    if RebuildEach or not state.cache then
-        payload = build()
-        if not RebuildEach then state.cache = payload end
+-- ===== UI =====
+local PG = LP:WaitForChild("PlayerGui")
+if PG:FindFirstChild("BuildTextUI") then PG.BuildTextUI:Destroy() end
+
+local SG = Instance.new("ScreenGui")
+SG.Name = "BuildTextUI"
+SG.ResetOnSpawn = false
+SG.IgnoreGuiInset = true
+SG.DisplayOrder = 999
+SG.Parent = PG
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 300, 0, 240)
+Main.Position = UDim2.new(0.5, -150, 0.5, -120)
+Main.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+Main.BorderSizePixel = 0
+Main.ClipsDescendants = false
+Main.Active = true
+Main.Parent = SG
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+local mst = Instance.new("UIStroke", Main)
+mst.Color = Color3.fromRGB(60, 60, 80); mst.Thickness = 1
+
+local TB = Instance.new("Frame")
+TB.Size = UDim2.new(1, 0, 0, 30)
+TB.BackgroundColor3 = Color3.fromRGB(32, 32, 45)
+TB.BorderSizePixel = 0
+TB.Parent = Main
+Instance.new("UICorner", TB).CornerRadius = UDim.new(0, 10)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -90, 1, 0)
+Title.Position = UDim2.new(0, 12, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "BUILD TEXT"
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 12
+Title.TextColor3 = Color3.fromRGB(255, 200, 100)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TB
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 22, 0, 22)
+MinBtn.Position = UDim2.new(1, -52, 0.5, -11)
+MinBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 90)
+MinBtn.Text = "−"
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.TextSize = 14
+MinBtn.TextColor3 = Color3.new(1, 1, 1)
+MinBtn.BorderSizePixel = 0
+MinBtn.Parent = TB
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 5)
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 22, 0, 22)
+CloseBtn.Position = UDim2.new(1, -26, 0.5, -11)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+CloseBtn.Text = "✕"
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.TextSize = 12
+CloseBtn.TextColor3 = Color3.new(1, 1, 1)
+CloseBtn.BorderSizePixel = 0
+CloseBtn.Parent = TB
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 5)
+
+local Content = Instance.new("Frame")
+Content.Size = UDim2.new(1, -20, 1, -40)
+Content.Position = UDim2.new(0, 10, 0, 35)
+Content.BackgroundTransparency = 1
+Content.ClipsDescendants = false
+Content.Parent = Main
+
+local Lbl = Instance.new("TextLabel")
+Lbl.Size = UDim2.new(1, 0, 0, 16)
+Lbl.BackgroundTransparency = 1
+Lbl.Text = "Text to build:"
+Lbl.Font = Enum.Font.Gotham
+Lbl.TextSize = 11
+Lbl.TextColor3 = Color3.fromRGB(200, 220, 255)
+Lbl.TextXAlignment = Enum.TextXAlignment.Left
+Lbl.Parent = Content
+
+local Input = Instance.new("TextBox")
+Input.Size = UDim2.new(1, 0, 0, 28)
+Input.Position = UDim2.new(0, 0, 0, 20)
+Input.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+Input.Text = "HELLO"
+Input.PlaceholderText = "Type text..."
+Input.Font = Enum.Font.GothamBold
+Input.TextSize = 12
+Input.TextColor3 = Color3.new(1, 1, 1)
+Input.BorderSizePixel = 0
+Input.ClearTextOnFocus = false
+Input.Parent = Content
+Instance.new("UICorner", Input).CornerRadius = UDim.new(0, 5)
+local ipad = Instance.new("UIPadding", Input)
+ipad.PaddingLeft = UDim.new(0, 8)
+
+-- ===== BUILD MODE DROPDOWN =====
+local buildMode = "normal"
+
+local ModeRow = Instance.new("Frame")
+ModeRow.Size = UDim2.new(1, 0, 0, 28)
+ModeRow.Position = UDim2.new(0, 0, 0, 54)
+ModeRow.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+ModeRow.BorderSizePixel = 0
+ModeRow.ZIndex = 1
+ModeRow.Parent = Content
+Instance.new("UICorner", ModeRow).CornerRadius = UDim.new(0, 5)
+
+local ModeLbl = Instance.new("TextLabel")
+ModeLbl.Size = UDim2.new(0.5, -8, 1, 0)
+ModeLbl.Position = UDim2.new(0, 8, 0, 0)
+ModeLbl.BackgroundTransparency = 1
+ModeLbl.Text = "Build Mode:"
+ModeLbl.Font = Enum.Font.Gotham
+ModeLbl.TextSize = 11
+ModeLbl.TextColor3 = Color3.fromRGB(200, 220, 255)
+ModeLbl.TextXAlignment = Enum.TextXAlignment.Left
+ModeLbl.ZIndex = 2
+ModeLbl.Parent = ModeRow
+
+local ModeBtn = Instance.new("TextButton")
+ModeBtn.Size = UDim2.new(0.42, 0, 0, 20)
+ModeBtn.Position = UDim2.new(0.55, 0, 0, 4)
+ModeBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+ModeBtn.Text = "normal ▾"
+ModeBtn.Font = Enum.Font.GothamBold
+ModeBtn.TextSize = 10
+ModeBtn.TextColor3 = Color3.fromRGB(255, 140, 0)
+ModeBtn.BorderSizePixel = 0
+ModeBtn.ZIndex = 5
+ModeBtn.Parent = ModeRow
+Instance.new("UICorner", ModeBtn).CornerRadius = UDim.new(0, 4)
+
+local ModeDropdown = Instance.new("Frame")
+ModeDropdown.Size = UDim2.new(0.42, 0, 0, 0)
+ModeDropdown.Position = UDim2.new(0.55, 0, 1, 2)
+ModeDropdown.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+ModeDropdown.BorderSizePixel = 0
+ModeDropdown.ClipsDescendants = true
+ModeDropdown.Visible = false
+ModeDropdown.ZIndex = 20
+ModeDropdown.Parent = ModeRow
+Instance.new("UICorner", ModeDropdown).CornerRadius = UDim.new(0, 4)
+
+local function makeOption(name, y)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, 0, 0, 22)
+    b.Position = UDim2.new(0, 0, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+    b.Text = name
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 10
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.BorderSizePixel = 0
+    b.ZIndex = 21
+    b.Parent = ModeDropdown
+    b.MouseEnter:Connect(function() b.BackgroundColor3 = Color3.fromRGB(55, 55, 70) end)
+    b.MouseLeave:Connect(function() b.BackgroundColor3 = Color3.fromRGB(40, 40, 52) end)
+    b.MouseButton1Click:Connect(function()
+        buildMode = name
+        ModeBtn.Text = name .. " ▾"
+        ModeDropdown.Visible = false
+        ModeDropdown.Size = UDim2.new(0.42, 0, 0, 0)
+        modeOpen = false
+    end)
+    return b
+end
+
+makeOption("normal", 0)
+makeOption("detailed", 22)
+
+local modeOpen = false
+ModeBtn.MouseButton1Click:Connect(function()
+    modeOpen = not modeOpen
+    if modeOpen then
+        ModeDropdown.Visible = true
+        ModeDropdown.Size = UDim2.new(0.42, 0, 0, 44)
     else
-        payload = state.cache
-    end
-    for _ = 1, FireBurst do
-        state.remote:FireServer(payload)
-    end
-    state.fires = state.fires + 1
-end
-
-local function start()
-    if state.running then return end
-    state.running = true
-    state.cache = nil
-    state.fires = 0
-    print("[CRASH] STARTING — building payload...")
-    state.thread = task.spawn(function()
-        while state.running do
-            local ok, err = pcall(fire)
-            if not ok then
-                print("[CRASH] fire error:", err)
-            end
-            if FrameDelay > 0 then
-                task.wait(FrameDelay)
-            else
-                RunService.Heartbeat:Wait()
-            end
-        end
-    end)
-end
-
-local function stop()
-    if not state.running then return end
-    state.running = false
-    if state.thread then pcall(task.cancel, state.thread) end
-    state.thread = nil
-    state.cache = nil
-    print("[CRASH] STOPPED — total fires:", state.fires)
-end
-
--- ═══════════ DEBUG PRINT EVERY 5s ═══════════
-task.spawn(function()
-    local last = 0
-    while true do
-        task.wait(5)
-        if state.running then
-            print(string.format("[CRASH] fires=%d (+%d/5s) remote=%s",
-                state.fires, state.fires - last,
-                state.remote and "ok" or "MISSING"))
-            last = state.fires
-        else
-            last = 0
-        end
+        ModeDropdown.Size = UDim2.new(0.42, 0, 0, 0)
+        task.delay(0.12, function() if not modeOpen then ModeDropdown.Visible = false end end)
     end
 end)
 
--- ═══════════ CHAT COMMANDS ═══════════
-local started = false
+-- ===== SPEED SLIDER =====
+local SpeedRow = Instance.new("Frame")
+SpeedRow.Size = UDim2.new(1, 0, 0, 46)
+SpeedRow.Position = UDim2.new(0, 0, 0, 88)
+SpeedRow.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+SpeedRow.BorderSizePixel = 0
+SpeedRow.Parent = Content
+Instance.new("UICorner", SpeedRow).CornerRadius = UDim.new(0, 5)
 
-local function onMessage(msg)
-    local m = tostring(msg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-    print("[CRASH] chat received:", m)
-    if m == "!crash" then
-        if not started then
-            started = true
-            pcall(start)
-        end
-    elseif m == "!stop" then
-        if started then
-            started = false
-            pcall(stop)
-        end
-    end
+local SpeedLbl = Instance.new("TextLabel")
+SpeedLbl.Size = UDim2.new(1, -16, 0, 16)
+SpeedLbl.Position = UDim2.new(0, 8, 0, 2)
+SpeedLbl.BackgroundTransparency = 1
+SpeedLbl.Text = "Speed:  80 ms / block"
+SpeedLbl.Font = Enum.Font.Gotham
+SpeedLbl.TextSize = 10
+SpeedLbl.TextColor3 = Color3.fromRGB(200, 220, 255)
+SpeedLbl.TextXAlignment = Enum.TextXAlignment.Left
+SpeedLbl.Parent = SpeedRow
+
+local Track = Instance.new("Frame")
+Track.Size = UDim2.new(1, -16, 0, 8)
+Track.Position = UDim2.new(0, 8, 0, 26)
+Track.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+Track.BorderSizePixel = 0
+Track.Parent = SpeedRow
+Instance.new("UICorner", Track).CornerRadius = UDim.new(0, 4)
+
+local Fill = Instance.new("Frame")
+Fill.Size = UDim2.new(0.21, 0, 1, 0)
+Fill.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
+Fill.BorderSizePixel = 0
+Fill.Parent = Track
+Instance.new("UICorner", Fill).CornerRadius = UDim.new(0, 4)
+
+local Knob = Instance.new("Frame")
+Knob.Size = UDim2.new(0, 14, 0, 14)
+Knob.Position = UDim2.new(0.21, -7, 0.5, -7)
+Knob.BackgroundColor3 = Color3.new(1,1,1)
+Knob.BorderSizePixel = 0
+Knob.ZIndex = 2
+Knob.Parent = Track
+Instance.new("UICorner", Knob).CornerRadius = UDim.new(0, 7)
+
+local MIN_DELAY, MAX_DELAY = 0.02, 0.30
+local buildDelay = 0.08
+
+local function setDelay(d)
+    buildDelay = math.clamp(d, MIN_DELAY, MAX_DELAY)
+    local t = (buildDelay - MIN_DELAY) / (MAX_DELAY - MIN_DELAY)
+    Fill.Size = UDim2.new(t, 0, 1, 0)
+    Knob.Position = UDim2.new(t, -7, 0.5, -7)
+    SpeedLbl.Text = ("Speed:  %d ms / block"):format(math.floor(buildDelay * 1000 + 0.5))
 end
 
-pcall(function() player.Chatted:Connect(onMessage) end)
-pcall(function()
-    TextChatService.MessageReceived:Connect(function(message)
-        if not message.TextSource then return end
-        if message.TextSource.UserId ~= player.UserId then return end
-        onMessage(message.Text)
+local draggingSlider = false
+local function updateFromX(absX)
+    local a = Track.AbsolutePosition.X
+    local w = Track.AbsoluteSize.X
+    if w <= 0 then return end
+    local t = math.clamp((absX - a) / w, 0, 1)
+    setDelay(MIN_DELAY + t * (MAX_DELAY - MIN_DELAY))
+end
+
+Track.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = true
+        updateFromX(input.Position.X)
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if draggingSlider and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        updateFromX(input.Position.X)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingSlider = false
+    end
+end)
+
+-- ===== BUTTONS =====
+local BtnRow = Instance.new("Frame")
+BtnRow.Size = UDim2.new(1, 0, 0, 32)
+BtnRow.Position = UDim2.new(0, 0, 0, 140)
+BtnRow.BackgroundTransparency = 1
+BtnRow.Parent = Content
+
+local RunBtn = Instance.new("TextButton")
+RunBtn.Size = UDim2.new(0.48, 0, 1, 0)
+RunBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
+RunBtn.Text = "RUN"
+RunBtn.Font = Enum.Font.GothamBold
+RunBtn.TextSize = 12
+RunBtn.TextColor3 = Color3.new(1, 1, 1)
+RunBtn.BorderSizePixel = 0
+RunBtn.Parent = BtnRow
+Instance.new("UICorner", RunBtn).CornerRadius = UDim.new(0, 5)
+
+local StopBtn = Instance.new("TextButton")
+StopBtn.Size = UDim2.new(0.48, 0, 1, 0)
+StopBtn.Position = UDim2.new(0.52, 0, 0, 0)
+StopBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+StopBtn.Text = "STOP"
+StopBtn.Font = Enum.Font.GothamBold
+StopBtn.TextSize = 12
+StopBtn.TextColor3 = Color3.new(1, 1, 1)
+StopBtn.BorderSizePixel = 0
+StopBtn.Parent = BtnRow
+Instance.new("UICorner", StopBtn).CornerRadius = UDim.new(0, 5)
+
+local Status = Instance.new("TextLabel")
+Status.Size = UDim2.new(1, 0, 0, 18)
+Status.Position = UDim2.new(0, 0, 0, 178)
+Status.BackgroundTransparency = 1
+Status.Text = "Ready"
+Status.Font = Enum.Font.Gotham
+Status.TextSize = 10
+Status.TextColor3 = Color3.fromRGB(180, 180, 200)
+Status.TextXAlignment = Enum.TextXAlignment.Left
+Status.Parent = Content
+
+-- ===== STATE =====
+local building = false
+local stopRequested = false
+
+-- ===== BUILD =====
+local function buildText(text)
+    local char = LP.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then Status.Text = "No character" return end
+
+    local remote, tool = getBuildRemote()
+    if not remote then Status.Text = "No Build tool found" return end
+
+    if tool.Parent ~= char then
+        tool.Parent = char
+        task.wait(0.1)
+    end
+
+    local origin = root.CFrame
+    local _, yaw = root.CFrame:ToOrientation()
+    local snapped = math.round(yaw / (math.pi/2)) * (math.pi/2)
+    local frame = CFrame.new(root.Position) * CFrame.Angles(0, snapped, 0) * CFrame.new(0, 0, -8)
+
+    local spacing = buildMode == "normal" and 4 or 1
+    local pts = textPoints(text, spacing)
+    local total = #pts
+    if total == 0 then Status.Text = "No valid characters" return end
+
+    Status.Text = "Building 0/" .. total .. " (" .. buildMode .. ")"
+
+    for i, off in ipairs(pts) do
+        if stopRequested then break end
+        if not root.Parent then break end
+
+        local pos = (frame * CFrame.new(off)).Position
+        if buildMode == "normal" then
+            pos = snapVec(pos)
+        end
+        root.CFrame = CFrame.new(pos + Vector3.new(0, 6, 0))
+        remote:FireServer(workspace.Terrain, Enum.NormalId.Top, pos, buildMode)
+
+        task.wait(buildDelay)
+
+        if i % 3 == 0 or i == total then
+            Status.Text = "Building " .. i .. "/" .. total
+        end
+    end
+
+    if root.Parent then root.CFrame = origin end
+    Status.Text = stopRequested and ("Stopped at " .. total .. " blocks") or ("Done! " .. total .. " blocks")
+end
+
+-- ===== DRAG =====
+local dragging, dragStart, startPos = false, nil, nil
+TB.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging, dragStart, startPos = true, input.Position, Main.Position
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        local d = input.Position - dragStart
+        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ===== MINIMIZE =====
+local minimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    Content.Visible = not minimized
+    Main.Size = UDim2.new(0, 300, 0, minimized and 30 or 240)
+    MinBtn.Text = minimized and "+" or "−"
+end)
+
+-- ===== CLOSE =====
+CloseBtn.MouseButton1Click:Connect(function()
+    stopRequested = true
+    SG:Destroy()
+end)
+
+-- ===== RUN =====
+RunBtn.MouseButton1Click:Connect(function()
+    if building then return end
+    local text = Input.Text
+    if text == "" or text:gsub("%s", "") == "" then
+        Status.Text = "Type something first"
+        return
+    end
+    building = true
+    stopRequested = false
+    task.spawn(function()
+        local ok, err = pcall(buildText, text)
+        if not ok then Status.Text = "Error: " .. tostring(err) end
+        building = false
     end)
 end)
 
-print("[CRASH] ready — type !crash in chat")
+-- ===== STOP =====
+StopBtn.MouseButton1Click:Connect(function()
+    if building then
+        stopRequested = true
+        Status.Text = "Stopping..."
+    end
+end)
+
+setDelay(buildDelay)
